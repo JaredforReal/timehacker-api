@@ -55,18 +55,27 @@ class TodoResponse(BaseModel):
 # 认证依赖
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
     try:
+        # 打印一部分token用于调试
+        token_preview = credentials.credentials[:15] + "..." if credentials.credentials else "None"
+        print(f"Auth attempt with token: {token_preview}")
+        
         user = supabase.auth.get_user(credentials.credentials)
         if not user:
+            print("No user found with the provided token")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication credentials",
             )
+        
+        print(f"Authenticated user: {user.user.email if user and user.user else 'Unknown'}")
         return user
     except Exception as e:
+        print(f"Auth error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
+            detail=f"Could not validate credentials: {str(e)}",
         )
+
 
 # API端点
 @app.get("/api/")
