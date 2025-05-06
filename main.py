@@ -14,7 +14,8 @@ app = FastAPI()
 # 允许跨域
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://localhost:5173", "http://localhost:8000", "http://timehacker.cn", "https://www.timehacker.cn"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
