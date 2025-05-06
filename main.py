@@ -33,6 +33,8 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_KEY")
 )
+print("SUPABASE_URL:", os.getenv("SUPABASE_URL"))
+print("SUPABASE_KEY:", "​**​**" + os.getenv("SUPABASE_KEY")[-4:] if os.getenv("SUPABASE_KEY") else None)
 
 # 数据模型
 class TodoCreate(BaseModel):
