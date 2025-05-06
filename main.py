@@ -52,6 +52,10 @@ class TodoResponse(BaseModel):
     is_completed: bool
     created_at: str
     updated_at: str
+    
+class UserLogin(BaseModel):
+    email: str
+    password: str
 
 # 认证依赖
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
@@ -82,6 +86,24 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(HTTPBea
 @app.get("/api/")
 async def read_root():
     return {"message": "Hello from API"}
+
+@app.post("/token")
+async def login(user: UserLogin):
+    try:
+        # 调用 Supabase 登录接口
+        response = supabase.auth.sign_in_with_password({
+            "email": user.email,
+            "password": user.password
+        })
+        return {
+            "access_token": response.session.access_token,
+            "token_type": "bearer"
+        }
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials"
+        )
 
 @app.get("/todos", response_model=List[TodoResponse])
 async def get_todos(user = Depends(get_current_user)):
