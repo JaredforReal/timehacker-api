@@ -21,6 +21,7 @@ app.add_middleware(
                    "https://www.timehacker.cn",
                    "https://timehacker.cn",
                    "https://api.timehacker.cn",
+                   "https://time-hacker.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
