@@ -79,26 +79,6 @@ class PomodoroSettings(BaseModel):
     longBreakTime: int
     sessionsUntilLongBreak: int
 
-# 番茄钟数据模型
-class PomodoroSessionCreate(BaseModel):
-    title: str
-    duration: int
-    completedAt: str
-
-class PomodoroSessionResponse(BaseModel):
-    id: str
-    user_id: str
-    title: str
-    duration: int
-    completedAt: str
-    created_at: str
-
-class PomodoroSettings(BaseModel):
-    workTime: int
-    shortBreakTime: int
-    longBreakTime: int
-    sessionsUntilLongBreak: int
-
 # 认证依赖
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
     try:
@@ -261,8 +241,12 @@ async def delete_todo(todo_id: str, user = Depends(get_current_user)):
 @app.post("/pomodoro/sessions", response_model=PomodoroSessionResponse, status_code=status.HTTP_201_CREATED)
 async def create_pomodoro_session(session: PomodoroSessionCreate, user = Depends(get_current_user)):
     try:
-        session_data = session.dict()
-        session_data["user_id"] = str(user.user.id)
+        session_data = {
+            "title": session.title,
+            "duration": session.duration,
+            "completedat": session.completedAt,  # 注意这里转换为小写
+            "user_id": str(user.user.id)
+        }
         
         response = supabase.table("pomodoro_sessions").insert(session_data).execute()
         
@@ -272,7 +256,11 @@ async def create_pomodoro_session(session: PomodoroSessionCreate, user = Depends
                 detail="Failed to create pomodoro session"
             )
             
-        return response.data[0]
+        result = dict(response.data[0])
+        if "completedat" in result:
+            result["completedAt"] = result.pop("completedat")
+        return result
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -285,11 +273,17 @@ async def get_pomodoro_sessions(user = Depends(get_current_user)):
         response = supabase.table("pomodoro_sessions")\
             .select("*")\
             .eq("user_id", str(user.user.id))\
-            .order("completedAt", desc=True)\
+            .order("completedat", desc=True)\
             .limit(50)\
             .execute()
         
-        return response.data
+        result = []
+        for session in response.data:
+            session_dict = dict(session)
+            if "completedat" in session_dict:
+                session_dict["completedAt"] = session_dict.pop("completedat")
+            result.append(session_dict)
+        return result
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -307,22 +301,45 @@ async def get_pomodoro_settings(user = Depends(get_current_user)):
         
         # 如果找到设置则返回
         if response.data and len(response.data) > 0:
-            return response.data[0]
+            settings = dict(response.data[0])
+            converted_settings = {
+                "workTime": settings.get("worktime", 25),
+                "shortBreakTime": settings.get("shortbreaktime", 5),
+                "longBreakTime": settings.get("longbreaktime", 15),
+                "sessionsUntilLongBreak": settings.get("sessionsuntillongbreak", 4)
+            }
+            return converted_settings
         
         # 如果未找到，则使用默认设置并创建
         default_settings = {
             "user_id": str(user.user.id),
-            "workTime": 25,
-            "shortBreakTime": 5,
-            "longBreakTime": 15,
-            "sessionsUntilLongBreak": 4
+            "worktime": 25,
+            "shortbreaktime": 5,
+            "longbreaktime": 15,
+            "sessionsuntillongbreak": 4
         }
         
         create_response = supabase.table("pomodoro_settings")\
             .insert(default_settings)\
             .execute()
         
-        return create_response.data[0] if create_response.data else default_settings
+        if create_response.data:
+            settings = dict(create_response.data[0])
+            converted_settings = {
+                "workTime": settings.get("worktime", 25),
+                "shortBreakTime": settings.get("shortbreaktime", 5),
+                "longBreakTime": settings.get("longbreaktime", 15),
+                "sessionsUntilLongBreak": settings.get("sessionsuntillongbreak", 4)
+            }
+            return converted_settings
+        else:
+            return {
+                "workTime": 25,
+                "shortBreakTime": 5,
+                "longBreakTime": 15,
+                "sessionsUntilLongBreak": 4
+            }
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -340,14 +357,20 @@ async def update_pomodoro_settings(settings: PomodoroSettings, user = Depends(ge
                 detail="All settings values must be greater than 0"
             )
         
+        # 转换为数据库使用的小写键名
+        settings_data = {
+            "user_id": str(user.user.id),
+            "worktime": settings.workTime,
+            "shortbreaktime": settings.shortBreakTime,
+            "longbreaktime": settings.longBreakTime,
+            "sessionsuntillongbreak": settings.sessionsUntilLongBreak
+        }
+        
         # 首先检查是否已存在设置
         existing = supabase.table("pomodoro_settings")\
             .select("*")\
             .eq("user_id", str(user.user.id))\
             .execute()
-        
-        settings_data = settings.dict()
-        settings_data["user_id"] = str(user.user.id)
         
         if existing.data and len(existing.data) > 0:
             # 更新现有设置
@@ -367,7 +390,14 @@ async def update_pomodoro_settings(settings: PomodoroSettings, user = Depends(ge
                 detail="Failed to update pomodoro settings"
             )
             
-        return response.data[0]
+        settings = dict(response.data[0])
+        converted_settings = {
+            "workTime": settings["worktime"],
+            "shortBreakTime": settings["shortbreaktime"],
+            "longBreakTime": settings["longbreaktime"],
+            "sessionsUntilLongBreak": settings["sessionsuntillongbreak"]
+        }
+        return converted_settings
     except HTTPException as e:
         raise e
     except Exception as e:
