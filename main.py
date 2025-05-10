@@ -14,20 +14,11 @@ app = FastAPI()
 # 允许跨域
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有来源，生产环境中请根据需要修改
-    # allow_origins=["http://localhost:5173",
-    #                "https://localhost:5173",
-    #                "http://localhost:8000",
-    #                "http://timehacker.cn",
-    #                "https://www.timehacker.cn",
-    #                "https://timehacker.cn",
-    #                "https://api.timehacker.cn",
-    #                "http://time-hacker.vercel.app",
-    #                "https://time-hacker.vercel.app",
-    # ],
-    # allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_origins=["*"],  # 允许所有来源
+    allow_credentials=True,  # 允许凭据
+    allow_methods=["*"],  # 允许所有方法
+    allow_headers=["*"],  # 允许所有头部
+    expose_headers=["*"],  # 允许所有响应头部
 )
 
 # 直接从环境变量获取
@@ -87,7 +78,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(HTTPBea
 # API端点
 @app.get("/api/")
 async def read_root():
-    return {"message": "Hello from API"}
+    return {"message": "Hello from API *"}
 
 @app.post("/token")
 async def login(user: UserLogin):
@@ -140,7 +131,7 @@ async def delete_todo(todo_id: str, user = Depends(get_current_user)):
 # 健康检查端点
 @app.get("/")
 async def health_check():
-    return {"status": "ok", "message": "Todo API is running"}
+    return {"status": "ok", "message": "Todo API is running *"}
 
 if __name__ == "__main__":
     import uvicorn
