@@ -6,3 +6,5 @@ pydantic>=1.8.0,<2.0.0
 python-dotenv
 httpx
 gunicorn
+redis
+fastapi-cache2

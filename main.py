@@ -1,28 +1,63 @@
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.middleware.cors import CORSMiddleware
-from supabase import create_client, Client
-from pydantic import BaseModel
-from typing import List, Optional
-from dotenv import load_dotenv
+# Standard library imports
 import os
 import jwt
-from datetime import datetime
+import logging
+import time
+
+# Third-party imports
+from dotenv import load_dotenv
+from typing import List, Optional
+from pydantic import BaseModel
+
+# FastAPI imports
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+# Redis-FastAPI imports
+from redis import asyncio as aioredis
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.redis import RedisBackend
+from fastapi_cache.decorator import cache
+from contextlib import asynccontextmanager
+
+# Database imports
+from supabase import create_client, Client
 
 # 加载环境变量
 load_dotenv()
-app = FastAPI()
+
+# 设置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 缓存配置
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Redis配置
+    redis = aioredis.from_url(
+        os.getenv("REDIS_URL"),
+        encoding="utf-8",
+        decode_responses=True
+    )
+    FastAPICache.init(
+        RedisBackend(redis),
+        prefix="fastapi-cache"
+    )
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 # 允许跨域
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=["*"],  # 允许所有来源
-    allow_origins=["http://localhost:5173",
-                   "https://www.timehacker.cn",
-                   "https://timehacker.cn",
-                   "https://api.timehacker.cn",
-                   "http://117.72.112.49",
-    ],
+    allow_origins=["*"],  # 允许所有来源
+    # allow_origins=["http://localhost:5173",
+    #                "https://www.timehacker.cn",
+    #                "https://timehacker.cn",
+    #                "https://api.timehacker.cn",
+    #                "http://117.72.112.49",
+    # ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
@@ -103,27 +138,21 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(HTTPBea
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Auth error: {str(e)}")
 
+
 # API端点
 @app.get("/api/")
+@cache(expire=30)  # Cache for 30 seconds
 async def read_root():
     return {"message": "Hello from API"}
 
 # Health check endpoint
 @app.get("/")
+@cache(expire=30)  # Cache for 30 seconds
 async def health_check():
     return {
         "status": "ok", 
         "message": "Todo API is running",
-        "version": "1.0.0"  # Consider adding version info
-    }
-
-# Health check endpoint
-@app.get("/")
-async def health_check():
-    return {
-        "status": "ok", 
-        "message": "Todo API is running",
-        "version": "1.0.0"  # Consider adding version info
+        "version": "1.1.0"  # Consider adding version info
     }
 
 @app.post("/token")
@@ -145,6 +174,7 @@ async def login(user: UserLogin):
         )
 
 @app.get("/todos", response_model=List[TodoResponse])
+@cache(expire=60)  # Cache for 60 seconds
 async def get_todos(user = Depends(get_current_user)):
     try:
         response = supabase.table("todos").select("*").eq("user_id", user.user.id).execute()
@@ -220,27 +250,27 @@ async def update_todo(
 @app.delete("/todos/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_todo(todo_id: str, user = Depends(get_current_user)):
     try:
-        # First verify the todo exists and belongs to the user
-        existing = supabase.table("todos")\
-            .select("*")\
+        # Combine check and delete in one operation for efficiency
+        response = supabase.table("todos")\
+            .delete()\
             .eq("id", todo_id)\
             .eq("user_id", str(user.user.id))\
             .execute()
             
-        if not existing.data:
+        # Check if anything was deleted
+        if not response.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Todo not found"
             )
         
-        # Delete the todo
-        supabase.table("todos")\
-            .delete()\
-            .eq("id", todo_id)\
-            .execute()
-            
+        # Invalidate relevant caches to ensure data consistency
+        await FastAPICache.clear(namespace="fastapi-cache")
+        
         return None
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
@@ -277,6 +307,7 @@ async def create_pomodoro_session(session: PomodoroSessionCreate, user = Depends
         )
 
 @app.get("/pomodoro/sessions", response_model=List[PomodoroSessionResponse])
+@cache(expire=60)  # Cache for 60 seconds
 async def get_pomodoro_sessions(user = Depends(get_current_user)):
     try:
         response = supabase.table("pomodoro_sessions")\
@@ -300,6 +331,7 @@ async def get_pomodoro_sessions(user = Depends(get_current_user)):
         )
 
 @app.get("/pomodoro/settings", response_model=PomodoroSettings)
+@cache(expire=60)  # Cache for 60 seconds
 async def get_pomodoro_settings(user = Depends(get_current_user)):
     try:
         # 获取用户的番茄钟设置
@@ -358,7 +390,7 @@ async def get_pomodoro_settings(user = Depends(get_current_user)):
 @app.put("/pomodoro/settings", response_model=PomodoroSettings)
 async def update_pomodoro_settings(settings: PomodoroSettings, user = Depends(get_current_user)):
     try:
-        # 验证设置值的有效性
+        # Validate settings values
         if (settings.workTime < 1 or settings.shortBreakTime < 1 or 
             settings.longBreakTime < 1 or settings.sessionsUntilLongBreak < 1):
             raise HTTPException(
@@ -366,7 +398,7 @@ async def update_pomodoro_settings(settings: PomodoroSettings, user = Depends(ge
                 detail="All settings values must be greater than 0"
             )
         
-        # 转换为数据库使用的小写键名
+        # Convert to database format with lowercase keys
         settings_data = {
             "user_id": str(user.user.id),
             "worktime": settings.workTime,
@@ -375,38 +407,27 @@ async def update_pomodoro_settings(settings: PomodoroSettings, user = Depends(ge
             "sessionsuntillongbreak": settings.sessionsUntilLongBreak
         }
         
-        # 首先检查是否已存在设置
-        existing = supabase.table("pomodoro_settings")\
-            .select("*")\
-            .eq("user_id", str(user.user.id))\
+        # Use upsert to either insert or update in a single operation
+        response = supabase.table("pomodoro_settings")\
+            .upsert(settings_data, on_conflict="user_id")\
             .execute()
-        
-        if existing.data and len(existing.data) > 0:
-            # 更新现有设置
-            response = supabase.table("pomodoro_settings")\
-                .update(settings_data)\
-                .eq("user_id", str(user.user.id))\
-                .execute()
-        else:
-            # 创建新设置
-            response = supabase.table("pomodoro_settings")\
-                .insert(settings_data)\
-                .execute()
         
         if not response.data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to update pomodoro settings"
             )
-            
-        settings = dict(response.data[0])
-        converted_settings = {
-            "workTime": settings["worktime"],
-            "shortBreakTime": settings["shortbreaktime"],
-            "longBreakTime": settings["longbreaktime"],
-            "sessionsUntilLongBreak": settings["sessionsuntillongbreak"]
+        
+        # Invalidate cache for the get settings endpoint
+        await FastAPICache.clear(namespace="fastapi-cache")
+        
+        # Return the converted settings directly without additional DB look-up
+        return {
+            "workTime": settings.workTime,
+            "shortBreakTime": settings.shortBreakTime,
+            "longBreakTime": settings.longBreakTime,
+            "sessionsUntilLongBreak": settings.sessionsUntilLongBreak
         }
-        return converted_settings
     except HTTPException as e:
         raise e
     except Exception as e:
