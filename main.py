@@ -20,6 +20,7 @@ from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 from fastapi_cache.decorator import cache
 from contextlib import asynccontextmanager
+from fastapi_cache.backends.inmemory import InMemoryBackend 
 
 # Database imports
 from supabase import create_client, Client
@@ -34,17 +35,34 @@ logger = logging.getLogger(__name__)
 # 缓存配置
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Redis配置
-    redis = aioredis.from_url(
-        os.getenv("REDIS_URL"),
-        encoding="utf-8",
-        decode_responses=True
-    )
-    FastAPICache.init(
-        RedisBackend(redis),
-        prefix="fastapi-cache"
-    )
+    try:
+        # Redis配置
+        redis = aioredis.from_url(
+            os.getenv("REDIS_URL"),
+            encoding="utf-8",
+            decode_responses=True
+        )
+        await redis.ping()
+        logger.info("Redis connection established")
+        
+        FastAPICache.init(
+            RedisBackend(redis),
+            prefix="fastapi-cache"
+        )
+        logger.info("FastAPICache initialized")
+    except Exception as e:
+        logger.warning(f"Redis connection failed: {str(e)}")
+        logger.info("Using in-memory cache")
+        FastAPICache.init(InMemoryBackend())
+
     yield
+
+    try:
+        if hasattr(FastAPICache, "_backend") and hasattr(FastAPICache._backend, "redis"):
+            await FastAPICache._backend.redis.close()
+            logger.info("Redis connection closed")
+    except Exception as e:
+        logger.error(f"Error closing Redis connection: {str(e)}")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -414,23 +432,12 @@ async def update_pomodoro_settings(settings: PomodoroSettings, user = Depends(ge
         # Log the operation about to be performed
         logger.info(f"Upserting settings with data: {settings_data}")
         
-        # Use upsert to either insert or update in a single operation
-        response = supabase.table("pomodoro_settings")\
-            .upsert(settings_data, on_conflict="user_id")\
-            .execute()
-        
-                
-        # Log response
-        logger.info(f"Upsert response: {response}")
-        
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to update pomodoro settings"
-            )
-        
-        # Invalidate cache for the get settings endpoint
-        await FastAPICache.clear(namespace="fastapi-cache")
+        try:
+            if FastAPICache._initialized:
+                await FastAPICache.clear(namespace="fastapi-cache")
+                logger.info("Cache cleared after settings update")
+        except Exception as cache_error:
+            logger.error(f"Cache clearing error: {str(cache_error)}")
         
         # Return the converted settings directly without additional DB look-up
         return {
@@ -439,12 +446,11 @@ async def update_pomodoro_settings(settings: PomodoroSettings, user = Depends(ge
             "longBreakTime": settings.longBreakTime,
             "sessionsUntilLongBreak": settings.sessionsUntilLongBreak
         }
-    except HTTPException as e:
-        raise e
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error: {str(e)}"
+            detail=f"Server error: {str(e)}"
         )
 
     
