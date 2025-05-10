@@ -51,13 +51,13 @@ app = FastAPI(lifespan=lifespan)
 # 允许跨域
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有来源
-    # allow_origins=["http://localhost:5173",
-    #                "https://www.timehacker.cn",
-    #                "https://timehacker.cn",
-    #                "https://api.timehacker.cn",
-    #                "http://117.72.112.49",
-    # ],
+    # allow_origins=["*"],  # 允许所有来源
+    allow_origins=["http://localhost:5173",
+                   "https://www.timehacker.cn",
+                   "https://timehacker.cn",
+                   "https://api.timehacker.cn",
+                   "http://117.72.112.49",
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
@@ -390,6 +390,10 @@ async def get_pomodoro_settings(user = Depends(get_current_user)):
 @app.put("/pomodoro/settings", response_model=PomodoroSettings)
 async def update_pomodoro_settings(settings: PomodoroSettings, user = Depends(get_current_user)):
     try:
+        # Log inputs for debugging
+        logger.info(f"Updating settings for user: {user.user.id}")
+        logger.info(f"New settings: {settings.dict()}")
+
         # Validate settings values
         if (settings.workTime < 1 or settings.shortBreakTime < 1 or 
             settings.longBreakTime < 1 or settings.sessionsUntilLongBreak < 1):
@@ -407,10 +411,17 @@ async def update_pomodoro_settings(settings: PomodoroSettings, user = Depends(ge
             "sessionsuntillongbreak": settings.sessionsUntilLongBreak
         }
         
+        # Log the operation about to be performed
+        logger.info(f"Upserting settings with data: {settings_data}")
+        
         # Use upsert to either insert or update in a single operation
         response = supabase.table("pomodoro_settings")\
             .upsert(settings_data, on_conflict="user_id")\
             .execute()
+        
+                
+        # Log response
+        logger.info(f"Upsert response: {response}")
         
         if not response.data:
             raise HTTPException(
