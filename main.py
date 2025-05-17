@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
@@ -7,7 +7,6 @@ from typing import List, Optional
 from dotenv import load_dotenv
 import os
 import jwt
-from datetime import datetime
 
 # 加载环境变量
 load_dotenv()
@@ -33,8 +32,6 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_KEY")
 )
-print("SUPABASE_URL:", os.getenv("SUPABASE_URL"))
-print("SUPABASE_KEY:", "​**​**" + os.getenv("SUPABASE_KEY")[-4:] if os.getenv("SUPABASE_KEY") else None)
 
 # TodoList数据模型
 class TodoCreate(BaseModel):
@@ -78,6 +75,18 @@ class PomodoroSettings(BaseModel):
     shortBreakTime: int
     longBreakTime: int
     sessionsUntilLongBreak: int
+
+# 个人资料模型
+class ProfileResponse(BaseModel):
+    id: str
+    name: Optional[str] = None
+    school: Optional[str] = None
+    avatar: Optional[str] = None
+    
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    school: Optional[str] = None
+    avatar: Optional[str] = None
 
 # 认证依赖
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
@@ -406,6 +415,154 @@ async def update_pomodoro_settings(settings: PomodoroSettings, user = Depends(ge
             detail=f"Database error: {str(e)}"
         )
 
+
+# 获取个人资料
+@app.get("/profile", response_model=ProfileResponse)
+async def get_profile(user = Depends(get_current_user)):
+    try:
+        response = supabase.table("profiles")\
+            .select("*")\
+            .eq("id", str(user.user.id))\
+            .single()\
+            .execute()
+            
+        if not response.data:
+            # 如果没有找到个人资料，创建一个空的
+            default_profile = {
+                "id": str(user.user.id),
+                "name": "",
+                "school": "",
+                "avatar": None
+            }
+            
+            create_response = supabase.table("profiles")\
+                .insert(default_profile)\
+                .execute()
+                
+            if create_response.data:
+                return create_response.data[0]
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to create profile"
+                )
+        
+        return response.data
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+# 更新个人资料
+@app.put("/profile", response_model=ProfileResponse)
+async def update_profile(profile: ProfileUpdate, user = Depends(get_current_user)):
+    try:
+        # 检查是否已存在个人资料
+        existing = supabase.table("profiles")\
+            .select("*")\
+            .eq("id", str(user.user.id))\
+            .execute()
+            
+        if not existing.data:
+            # 如果没有找到个人资料，创建一个新的
+            default_profile = {
+                "id": str(user.user.id),
+                "name": profile.name if profile.name else "",
+                "school": profile.school if profile.school else "",
+                "avatar": profile.avatar
+            }
+            
+            create_response = supabase.table("profiles")\
+                .insert(default_profile)\
+                .execute()
+                
+            if create_response.data:
+                return create_response.data[0]
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to create profile"
+                )
+        # 更新现有个人资料
+        update_data = profile.dict(exclude_unset=True)
+        response = supabase.table("profiles")\
+            .update(update_data)\
+            .eq("id", str(user.user.id))\
+            .execute()
+        return response.data[0]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+# 上传头像
+@app.post("/profile/avatar", response_model=dict)
+async def upload_avatar(avatar: UploadFile = File(...), user = Depends(get_current_user)):
+    try:
+        # 读取文件内容
+        contents = await avatar.read()
+        
+        # 上传到Supabase存储
+        file_path = f"public/{user.user.id}.png"
+        response = supabase.storage.from_("avatars").upload(file_path, contents, {"upsert": True})
+            
+        if response.error:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to upload avatar: {response.error.message}"
+            )
+            
+        # 获取公共URL
+        url_response = supabase.storage.from_("avatars").get_public_url(file_path)
+            
+        # 更新用户头像URL
+        supabase.table("profiles")\
+            .update({"avatar": url_response.data.get("publicUrl")})\
+            .eq("id", str(user.user.id))\
+            .execute()
+            
+        return {"url": url_response.data.get("publicUrl")}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error uploading avatar: {str(e)}"
+        )
+        
+# 密码重置请求
+@app.post("/auth/reset-password")
+async def request_password_reset(reset_data: dict):
+    try:
+        email = reset_data.get("email")
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email is required"
+            )
+            
+        # 获取前端URL用于重定向
+        site_url = reset_data.get("site_url", os.getenv("SITE_URL", "https://www.timehacker.cn"))
+        
+        response = supabase.auth.reset_password_for_email(
+            email,
+            {"redirectTo": f"{site_url}/reset-password"}
+        )
+        
+        if response.error:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to send reset email: {response.error.message}"
+            )
+            
+        return {"message": "Password reset email sent"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error requesting password reset: {str(e)}"
+        )
     
 if __name__ == "__main__":
     import uvicorn
