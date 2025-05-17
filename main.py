@@ -486,6 +486,7 @@ async def update_pomodoro_settings(settings: PomodoroSettings, user = Depends(ge
 
 # 获取个人资料
 @app.get("/profile", response_model=ProfileResponse)
+@cache(expire=60)  # Cache for 60 seconds
 async def get_profile(user = Depends(get_current_user)):
     try:
         response = supabase.table("profiles")\
@@ -612,18 +613,24 @@ async def request_password_reset(reset_data: dict):
         # 获取前端URL用于重定向
         site_url = reset_data.get("site_url", os.getenv("SITE_URL", "https://www.timehacker.cn"))
         
-        response = supabase.auth.reset_password_for_email(
-            email,
-            {"redirectTo": f"{site_url}/reset-password"}
-        )
-        
-        if response.error:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to send reset email: {response.error.message}"
+        try:
+            response = supabase.auth.reset_password_for_email(
+                email,
+                {"redirectTo": f"{site_url}/reset-password"}
             )
             
-        return {"message": "Password reset email sent"}
+            if hasattr(response, "error") and response.error:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=response.error.message
+                )
+                
+            return {"message": "Password reset email sent"}
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error sending reset email: {str(e)}"
+            )
     except HTTPException:
         raise
     except Exception as e:
