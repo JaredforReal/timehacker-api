@@ -1,0 +1,67 @@
+# Python字节码文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 发布目录
+dist/
+build/
+*.egg-info/
+
+# 环境变量
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 测试和覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# 日志文件
+*.log
+logs/
+
+# 数据库
+*.db
+*.sqlite
+
+# Docker
+.dockerignore
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# 临时文件
+*.tmp
+*.temp
+
+# SSL证书（仅示例，实际部署时需要真实证书）
+ssl/
+
+# Backup文件
+*.bak
+
+# IDE特定文件
+*.code-workspace
+
+# 安全报告
+bandit-report.json

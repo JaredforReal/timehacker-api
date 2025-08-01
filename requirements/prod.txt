@@ -1,0 +1,11 @@
+# 生产环境依赖
+fastapi>=0.68.0,<1.0.0
+supabase>=2.0.0,<3.0.0
+python-multipart
+gunicorn
+pydantic>=2.0.0,<3.0.0
+pydantic-settings>=2.0.0,<3.0.0
+python-dotenv
+httpx
+PyJWT
+email-validator
