@@ -51,9 +51,14 @@ class PomodoroSessionUpdate(BaseModel):
 class PomodoroSessionResponse(BaseModel):
     id: str
     user_id: str
-    task_id: str | None = None
+    # 兼容前端显示所需字段
+    title: str | None = None
     duration: int
-    completed: bool
+    # 兼容旧字段与新字段
+    completed: bool | None = None
+    completedAt: str | None = None
+    # 历史字段保留，便于后续扩展
+    task_id: str | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
     created_at: datetime

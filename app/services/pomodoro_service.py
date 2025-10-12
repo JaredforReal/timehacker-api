@@ -66,8 +66,12 @@ class PomodoroService:
             result = []
             for session in response.data:
                 session_dict = dict(session)
+                # 兼容大小写与命名差异
                 if "completedat" in session_dict:
                     session_dict["completedAt"] = session_dict.pop("completedat")
+                # 标题字段兜底
+                if "title" not in session_dict:
+                    session_dict["title"] = None
                 result.append(session_dict)
 
             return result
