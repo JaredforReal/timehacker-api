@@ -2,6 +2,17 @@
 
 一个现代化的时间管理 API 服务，基于 FastAPI 构建，支持 Todo 管理和番茄钟计时功能。
 
+## 项目完成度与规划
+
+- **当前完成度**: FastAPI 服务已实现 `todos`、`pomodoro`、`profile`、`auth` 等核心路由，结合 Supabase 完成数据访问与认证；依赖注入、分层架构、覆盖各层的 Pytest 单元测试及 pre-commit 流程均已落地，可支撑基础的番茄钟与待办协同能力。
+- **已知缺口**: 缺少注册、刷新令牌等认证扩展能力，数据库 Schema 管理依赖 Supabase 控制台而非代码迁移，日志与可观测性只保留了 `print` 调试信息，异步任务与限流策略尚未实现。
+- **建议迭代**:
+
+1. 引入 Alembic 或 Supabase migration CLI 管理数据库版本，补充 Seed 数据与本地模拟。
+2. 扩展 `AuthService` 支持注册、Refresh Token、角色/权限控制，并为密码重置邮件引入异步队列。
+3. 增加结构化日志、Prometheus/OTel 监控与告警，结合 docker-compose 提供一键启动的整体验证环境。
+4. 对 Todos/Pomodoro 添加审计字段与乐观锁，避免并发覆盖，同时补充端到端测试覆盖。
+
 ## 快速开始
 
 ### 环境要求
