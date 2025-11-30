@@ -1,153 +1,154 @@
-from fastapi import HTTPException, UploadFile, status
-from supabase import Client
+"""
+用户资料服务
+"""
+import uuid
+from datetime import datetime
 
+from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.models.orm import Profile
 from app.models.schemas import AvatarUploadResponse, ProfileResponse, ProfileUpdate
 
 
 class ProfileService:
-    def __init__(self, supabase: Client):
-        self.supabase = supabase
+    def __init__(self, db: AsyncSession):
+        self.db = db
 
-    async def get_profile(self, user_id: str) -> ProfileResponse:
+    async def get_profile(self, user_id: uuid.UUID) -> ProfileResponse:
         """
         获取用户个人资料
         """
-        try:
-            response = (
-                self.supabase.table("profiles")
-                .select("*")
-                .eq("id", str(user_id))
-                .single()
-                .execute()
+        result = await self.db.execute(
+            select(Profile).where(Profile.user_id == user_id)
+        )
+        profile = result.scalar_one_or_none()
+        
+        if not profile:
+            # 创建默认资料
+            profile = Profile(
+                user_id=user_id,
+                name="",
+                school=""
             )
-
-            if not response.data:
-                # 如果没有找到个人资料，创建一个空的
-                default_profile = {
-                    "id": str(user_id),
-                    "name": "",
-                    "school": "",
-                    "avatar": None,
-                }
-
-                create_response = (
-                    self.supabase.table("profiles").insert(default_profile).execute()
-                )
-
-                if create_response.data:
-                    return create_response.data[0]
-                else:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Failed to create profile",
-                    )
-
-            return response.data
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Database error: {str(e)}",
-            )
+            self.db.add(profile)
+            await self.db.commit()
+            await self.db.refresh(profile)
+        
+        return ProfileResponse(
+            id=str(profile.id),
+            user_id=str(profile.user_id),
+            name=profile.name,
+            school=profile.school,
+            avatar=profile.avatar,
+            created_at=profile.created_at,
+            updated_at=profile.updated_at
+        )
 
     async def update_profile(
-        self, profile: ProfileUpdate, user_id: str
+        self, profile_data: ProfileUpdate, user_id: uuid.UUID
     ) -> ProfileResponse:
         """
         更新用户个人资料
         """
-        try:
-            # 检查是否已存在个人资料
-            existing = (
-                self.supabase.table("profiles")
-                .select("*")
-                .eq("id", str(user_id))
-                .execute()
+        result = await self.db.execute(
+            select(Profile).where(Profile.user_id == user_id)
+        )
+        profile = result.scalar_one_or_none()
+        
+        if not profile:
+            # 创建新资料
+            profile = Profile(
+                user_id=user_id,
+                name=profile_data.name or "",
+                school=profile_data.school or "",
+                avatar=profile_data.avatar
             )
-
-            if not existing.data:
-                # 如果没有找到个人资料，创建一个新的
-                default_profile = {
-                    "id": str(user_id),
-                    "name": profile.name if profile.name else "",
-                    "school": profile.school if profile.school else "",
-                    "avatar": profile.avatar,
-                }
-
-                create_response = (
-                    self.supabase.table("profiles").insert(default_profile).execute()
-                )
-
-                if create_response.data:
-                    return create_response.data[0]
-                else:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Failed to create profile",
-                    )
-
-            # 更新现有个人资料
-            update_data = profile.model_dump(exclude_unset=True)
-            response = (
-                self.supabase.table("profiles")
-                .update(update_data)
-                .eq("id", str(user_id))
-                .execute()
-            )
-
-            if not response.data:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Failed to update profile",
-                )
-
-            return response.data[0]
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Database error: {str(e)}",
-            )
+            self.db.add(profile)
+        else:
+            # 更新现有资料
+            update_data = profile_data.model_dump(exclude_unset=True)
+            for field, value in update_data.items():
+                setattr(profile, field, value)
+        
+        await self.db.commit()
+        await self.db.refresh(profile)
+        
+        return ProfileResponse(
+            id=str(profile.id),
+            user_id=str(profile.user_id),
+            name=profile.name,
+            school=profile.school,
+            avatar=profile.avatar,
+            created_at=profile.created_at,
+            updated_at=profile.updated_at
+        )
 
     async def upload_avatar(
-        self, avatar: UploadFile, user_id: str
+        self, avatar: UploadFile, user_id: uuid.UUID
     ) -> AvatarUploadResponse:
         """
-        上传用户头像
+        上传用户头像到腾讯云 COS
         """
         try:
+            from qcloud_cos import CosConfig, CosS3Client
+            
+            # 初始化 COS 客户端
+            config = CosConfig(
+                Region=settings.cos_region,
+                SecretId=settings.cos_secret_id,
+                SecretKey=settings.cos_secret_key
+            )
+            client = CosS3Client(config)
+            
             # 读取文件内容
             contents = await avatar.read()
-
-            # 上传到Supabase存储
-            file_path = f"public/{user_id}.png"
-            response = self.supabase.storage.from_("avatars").upload(
-                file_path, contents, {"upsert": True}
+            
+            # 生成文件名
+            timestamp = int(datetime.utcnow().timestamp())
+            file_key = f"avatars/{user_id}/{timestamp}.png"
+            
+            # 上传到 COS
+            client.put_object(
+                Bucket=settings.cos_bucket,
+                Body=contents,
+                Key=file_key,
+                ContentType=avatar.content_type or "image/png"
             )
-
-            if response.error:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to upload avatar: {response.error.message}",
+            
+            # 构建公开访问 URL
+            avatar_url = f"https://{settings.cos_bucket}.cos.{settings.cos_region}.myqcloud.com/{file_key}"
+            
+            # 更新数据库中的头像 URL
+            result = await self.db.execute(
+                select(Profile).where(Profile.user_id == user_id)
+            )
+            profile = result.scalar_one_or_none()
+            
+            if profile:
+                profile.avatar = avatar_url
+            else:
+                profile = Profile(
+                    user_id=user_id,
+                    name="",
+                    school="",
+                    avatar=avatar_url
                 )
-
-            # 获取公共URL
-            url_response = self.supabase.storage.from_("avatars").get_public_url(
-                file_path
+                self.db.add(profile)
+            
+            await self.db.commit()
+            
+            return AvatarUploadResponse(url=avatar_url)
+            
+        except ImportError:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="COS SDK 未安装"
             )
-
-            # 更新用户头像URL
-            self.supabase.table("profiles").update(
-                {"avatar": url_response.data.get("publicUrl")}
-            ).eq("id", str(user_id)).execute()
-
-            return AvatarUploadResponse(url=url_response.data.get("publicUrl"))
-        except HTTPException:
-            raise
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error uploading avatar: {str(e)}",
+                detail=f"头像上传失败: {str(e)}"
             )

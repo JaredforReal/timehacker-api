@@ -1,32 +1,64 @@
-from supabase import Client, create_client
+"""
+数据库连接和会话管理模块
+使用 SQLAlchemy 2.0 async 风格
+"""
+from collections.abc import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
-# 全局Supabase客户端实例（单例模式）
-_supabase_client: Client = None
+# 创建异步数据库引擎
+engine = create_async_engine(
+    settings.database_url,
+    echo=settings.debug,  # 开发模式下打印 SQL
+    pool_pre_ping=True,  # 连接前检查
+    pool_size=5,
+    max_overflow=10,
+)
+
+# 创建异步会话工厂
+async_session_maker = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
 
 
-def get_supabase_client() -> Client:
-    """
-    获取Supabase客户端实例（单例模式）
-    """
-    global _supabase_client
-    if _supabase_client is None:
-        _supabase_client = create_client(settings.supabase_url, settings.supabase_key)
-    return _supabase_client
+# ORM 基类
+class Base(DeclarativeBase):
+    pass
 
 
-def set_supabase_client(client: Client) -> None:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    设置Supabase客户端实例（主要用于测试）
+    获取数据库会话（依赖注入用）
     """
-    global _supabase_client
-    _supabase_client = client
+    async with async_session_maker() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
 
-def reset_supabase_client() -> None:
+async def init_db() -> None:
     """
-    重置Supabase客户端实例（主要用于测试清理）
+    初始化数据库（创建所有表）
+    注意：生产环境应使用 Alembic 迁移
     """
-    global _supabase_client
-    _supabase_client = None
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+async def close_db() -> None:
+    """
+    关闭数据库连接
+    """
+    await engine.dispose()

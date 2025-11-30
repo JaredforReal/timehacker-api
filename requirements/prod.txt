@@ -1,11 +1,31 @@
 # 生产环境依赖
-fastapi>=0.68.0,<1.0.0
-supabase>=2.0.0,<3.0.0
-python-multipart
-gunicorn
+fastapi>=0.100.0,<1.0.0
 pydantic>=2.0.0,<3.0.0
 pydantic-settings>=2.0.0,<3.0.0
-python-dotenv
-httpx
-PyJWT
-email-validator
+python-dotenv>=1.0.0
+
+# 数据库
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.29.0
+alembic>=1.13.0
+
+# 认证
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+
+# HTTP 客户端
+httpx>=0.25.0
+
+# 邮件（密码重置）
+aiosmtplib>=3.0.0
+
+# 腾讯云 COS（头像存储）
+cos-python-sdk-v5>=1.9.0
+
+# 服务器
+gunicorn>=21.0.0
+uvicorn[standard]>=0.24.0
+
+# 邮箱验证
+email-validator>=2.0.0
